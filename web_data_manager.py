@@ -5,6 +5,13 @@ from datetime import datetime
 import pandas as pd
 from collections import defaultdict
 
+import streamlit as st # Streamlit secrets 접근을 위해 추가
+
+# Google Sheets 라이브러리 추가
+import gspread
+from gspread_dataframe import set_with_dataframe, get_as_dataframe
+from oauth2client.service_account import ServiceAccountCredentials
+
 SETTINGS_FILE = 'settings.json'
 
 
@@ -14,7 +21,15 @@ class DataManager:
     ATTENDANCE_FILE = 'attendance.xlsx'
     MEMO_COLUMN = 'MEMO'
 
+# ⭐ Secrets에서 Sheets 정보 로드 ⭐
+    # secrets.toml에 설정한 키(key) 이름을 사용합니다.
+    SPREADSHEET_URL = st.secrets["sheet_url"]
+    GSHEETS_CREDENTIALS = st.secrets["gcp_service_account"]
+
     def __init__(self):
+
+        # ⭐ GSheets 클라이언트 초기화 ⭐
+        self._gsheet_client = self._get_gsheet_client()
         self.settings = self._load_settings()
         self.attendance_data = self._load_attendance_data()
         self.employees = self.settings.get("employees", [])
@@ -27,6 +42,15 @@ class DataManager:
         # 이 로직이 누락되어 9:00 설정 후 재시작해도 08:30 기준의 색상이 보였습니다.
         if hasattr(self, 'recalculate_all_attendance'):
             self.recalculate_all_attendance(standard_time_from_settings)
+
+# ⭐ Sheets 클라이언트 연결 메서드 추가 ⭐
+    def _get_gsheet_client(self):
+        # JSON 문자열을 credential 객체로 변환
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            self.GSHEETS_CREDENTIALS,
+            ['https://www.googleapis.com/auth/spreadsheets']
+        )
+        return gspread.authorize(creds)
 
 # web_data_manager.py 파일 내 DataManager 클래스에 추가
 
@@ -112,65 +136,96 @@ class DataManager:
         """
         return self.settings.get('holidays', {}).get(date_str)
 
-    # -------------------------------
-    # 출석 데이터 로드 / 저장
-    # -------------------------------
     def _load_attendance_data(self):
-        """출석 데이터를 attendance.xlsx에서 로드"""
-        if not os.path.exists(self.ATTENDANCE_FILE):
-            print(f"[WARN] Attendance file not found: {self.ATTENDANCE_FILE}")
-            return {}
-
+        """Google Sheets에서 출석 데이터를 로드합니다."""
         try:
-            # Excel → DataFrame
-            df = pd.read_excel(self.ATTENDANCE_FILE, dtype=str)
+            # 시트 열기
+            spreadsheet = self._gsheet_client.open_by_url(self.SPREADSHEET_URL)
+            worksheet = spreadsheet.worksheet("Sheet1") # 시트 이름이 'Sheet1'이라고 가정
+
+            # DataFrame으로 데이터 읽기 (Pandas 호환)
+            # header=0: 1행(A1)부터 헤더로 사용 (기본값)
+            df = get_as_dataframe(worksheet, header=0, skiprows=0) 
+
+            # 유효성 검사 및 인덱스 설정
+            if '날짜' not in df.columns:
+                 st.error("Google Sheets에 '날짜' 컬럼이 없습니다. 컬럼 헤더를 확인해주세요.")
+                 return {}
+
+            df.set_index('날짜', inplace=True)
+            # 값이 모두 비어있는 행 제거
+            df.dropna(how='all', inplace=True)
+            
+            # DataFrame을 기존의 attendance_data 딕셔너리 구조로 변환
+            # T.to_dict()는 {날짜(인덱스): {컬럼(직원/메모): 값}} 형식으로 변환합니다.
+            attendance_map = df.T.to_dict()
+
+            data = {}
+            for date_key, emp_map in attendance_map.items():
+                # 날짜를 문자열 YYYY-MM-DD 형식으로 통일
+                if isinstance(date_key, pd.Timestamp):
+                    date_str = date_key.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_key).strip()
+                
+                cleaned_map = {}
+                for k, v in emp_map.items():
+                    # NaN 값 (빈 셀) 처리 및 문자열 안전 처리
+                    if pd.notna(v) and str(v).strip() != "":
+                        # HTML 태그나 공백 제거 및 안전 처리 (기존 로직 유지)
+                        safe_val = str(v).replace("<", "&lt;").replace(">", "&gt;")
+                        cleaned_map[k] = safe_val
+
+                data[date_str] = cleaned_map
+
+            st.info(f"Google Sheets에서 **{len(data)}**일의 출석 데이터를 로드했습니다.")
+            return data
+
+        except gspread.exceptions.SpreadsheetNotFound:
+            st.error("Google Sheets 파일을 찾을 수 없습니다. URL과 공유 권한을 확인해주세요.")
+            return {}
         except Exception as e:
-            print(f"[ERROR] Failed to read Excel file: {e}")
+            st.error(f"Google Sheets 로드 오류 발생: {e}")
             return {}
 
-        # 날짜 컬럼 이름이 '날짜'로 되어 있다고 가정
-        if '날짜' not in df.columns:
-            print("[ERROR] Excel file missing '날짜' column.")
-            return {}
-
-        df = df.set_index('날짜')
-
-        # NaN -> 빈 문자열로 변환
-        df = df.fillna("")
-
-        # 각 날짜별 사전으로 변환
-        attendance_map = df.to_dict('index')
-
-        data = {}
-        for date_key, emp_map in attendance_map.items():
-            # 날짜를 문자열 YYYY-MM-DD 형식으로 통일
-            if isinstance(date_key, datetime):
-                date_str = date_key.strftime('%Y-%m-%d')
-            else:
-                date_str = str(date_key).strip()
-
-            # 모든 값은 문자열화 + HTML 안전 처리
-            cleaned_map = {}
-            for k, v in emp_map.items():
-                if pd.notna(v) and str(v).strip() != "":
-                    # HTML 태그나 공백 제거
-                    safe_val = str(v).replace("<", "&lt;").replace(">", "&gt;")
-                    cleaned_map[k] = safe_val
-
-            data[date_str] = cleaned_map
-
-        print(f"[INFO] Loaded {len(data)} days of attendance data.")
-        return data
 
     def _save_attendance_data(self):
-        """출석 데이터를 attendance.xlsx로 저장"""
+        """Google Sheets에 현재 출석 데이터를 저장합니다."""
         try:
-            df = pd.DataFrame.from_dict(self.attendance_data, orient='index')
-            df.index.name = '날짜'
+            # 1. 딕셔너리 데이터를 Sheets에 적합한 DataFrame으로 변환
+            rows = []
+            for date_str, emp_map in self.attendance_data.items():
+                row = {'날짜': date_str}
+                row.update(emp_map) 
+                rows.append(row)
+            
+            # DataFrame 생성 시, 컬럼 순서를 '날짜' + 직원 + 'MEMO' 순으로 정확히 유지해야 합니다.
+            # 이 순서는 Google Sheets의 헤더 순서와 일치해야 합니다.
+            columns = ['날짜'] + self.settings.get("employees", []) + [self.MEMO_COLUMN]
+            df = pd.DataFrame(rows).reindex(columns=columns)
+            
+            # NaN (빈 셀)을 빈 문자열로 채워 Sheets에 깔끔하게 저장
             df = df.fillna("")
-            df.to_excel(self.ATTENDANCE_FILE, sheet_name='Sheet1', engine='openpyxl')
+
+            # 2. Sheets에 저장
+            spreadsheet = self._gsheet_client.open_by_url(self.SPREADSHEET_URL)
+            worksheet = spreadsheet.worksheet("Sheet1")
+            
+            # 기존 데이터를 덮어쓰기 (A1 셀부터 DataFrame 내용으로 채웁니다)
+            set_with_dataframe(
+                worksheet, 
+                df, 
+                row=1, 
+                col=1, 
+                include_index=False, 
+                include_column_header=True
+            ) 
+            # st.info("데이터가 Google Sheets에 성공적으로 저장되었습니다.") # (Streamlit 앱이 성공 시 메시지 표시)
+
         except Exception as e:
-            print(f"[ERROR] Failed to save attendance data: {e}")
+            st.error(f"Google Sheets 저장 오류 발생: {e}")
+            print(f"[ERROR] Failed to save data to GSheets: {e}") # 터미널 로그 출력
+
 
     # -------------------------------
     # 인터페이스 메서드
