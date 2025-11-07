@@ -43,15 +43,19 @@ class DataManager:
         if hasattr(self, 'recalculate_all_attendance'):
             self.recalculate_all_attendance(standard_time_from_settings)
 
-# ⭐ Sheets 클라이언트 연결 메서드 수정 ⭐
+# ⭐ Sheets 클라이언트 연결 메서드 ⭐
     def _get_gsheet_client(self):
         # 1. secrets에서 받은 JSON 문자열을 파이썬 딕셔너리로 변환
-        #    (이 과정이 없으면 'str' object has no attribute 'get' 오류 발생)
-        key_dict = json.loads(self.GSHEETS_CREDENTIALS)
+        #    GSHEETS_CREDENTIALS는 st.secrets에서 로드된 JSON 문자열입니다.
+        try:
+            key_dict = json.loads(self.GSHEETS_CREDENTIALS) # ⭐ 이 줄이 핵심입니다. ⭐
+        except json.JSONDecodeError as e:
+            st.error(f"JSON Decode Error in Secrets: {e}")
+            raise RuntimeError("Failed to parse Google Sheets credentials.")
         
         # 2. 딕셔너리 객체를 credential 객체로 변환
         creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            key_dict, # ⭐ 수정된 부분: 문자열 대신 딕셔너리 객체 사용 ⭐
+            key_dict, 
             ['https://www.googleapis.com/auth/spreadsheets']
         )
         return gspread.authorize(creds)
