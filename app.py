@@ -166,6 +166,20 @@ div[data-testid="stMarkdownContainer"]:not(.calendar-cell) p strong {
     margin-bottom: 0.4rem !important;
 }
 
+/* 모든 달력 셀 내 텍스트에 적용 (확실하게!) */
+div[data-testid="stMarkdownContainer"] p {
+    font-size: 16px !important;
+    line-height: 1.1 !important;
+    color: #333 !important;
+}
+
+/* --- 2️⃣ 탭 버튼 폰트 재보정 --- */
+button[data-baseweb="tab"] p {
+    font-size: 1.8rem !important;
+    font-weight: 800 !important;
+    color: black !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -371,7 +385,7 @@ def render_calendar(dm):
                         display_text += f": <span style='color:{color};'>{status_name}</span>" 
                     
                     attendance_info_list.append(
-                        f"<p style='margin:0; line-height:1.2; font-size:18px;'>{display_text}</p>"
+                        f"<p style='margin:0; line-height:1.2; font-size:14px !important;'>{display_text}</p>"
                     )
             
             holiday_html = ""
@@ -383,7 +397,7 @@ def render_calendar(dm):
             elif holiday_name:
                 records_html = holiday_html
             else:
-                records_html = "<p style='color:grey; font-size:18px; margin:0;'>No Record</p>"
+                records_html = "<p style='color:grey; font-size:14px; margin:0;'>No Record</p>"
 
             today_tag = f'<div style="color:#4FC3F7; font-size:12px;">(Today)</div>' if is_today else ''
             
