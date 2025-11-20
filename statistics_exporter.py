@@ -14,6 +14,8 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase.pdfmetrics import registerFont, registerFontFamily
 from reportlab.pdfbase.ttfonts import TTFont
 
+# ⭐⭐ 핵심 수정: 이 줄을 추가해야 합니다. ⭐⭐
+import pathlib
 # xlsxwriter 엔진 사용을 위한 import
 import xlsxwriter 
 
@@ -308,3 +310,4 @@ class StatisticsExporter:
                 os.remove('temp_chart.png')
 
             raise Exception(f"Excel export error: {e}")
+
