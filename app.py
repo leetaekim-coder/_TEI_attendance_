@@ -1,793 +1,1017 @@
-# app.py
+# app.py 상단 (임포트 확인)
 
 import streamlit as st
-from web_data_manager import DataManager
-from datetime import date, datetime, timedelta
 import pandas as pd
-import os
-import calendar as pycal 
-# ⭐ Matplotlib, NumPy, io import 추가 ⭐
-import matplotlib.pyplot as plt
-import numpy as np
-import io
-# ⭐ PIL Image import (그래프 이미지를 메모리에 저장하기 위해 사용) ⭐
-from PIL import Image
+from datetime import datetime as dt_class, date # ⭐ Changed datetime class to dt_class ⭐
+import calendar as pycal
+import requests 
+from collections import defaultdict 
+import io          
+import re          
+import shutil      
+import os          
+import openpyxl # ⭐ Added: Necessary for Excel processing. ⭐
 
-# 달력 시작 요일 설정: 일요일(0)로 변경
-pycal.setfirstweekday(pycal.SUNDAY)
+from data_manager import DataManager 
+from statistics_exporter import StatisticsExporter
 
-# --- 1. 기본 설정 및 데이터 로드 ---
-APP_TITLE = "Employee Attendance Manager (Web Version)" 
-st.set_page_config(page_title=APP_TITLE, layout="wide")
-
-# --- 2. 로고 및 메인 타이틀 표시 ---
-LOGO_PATH = "./assets/logo.png"
-
-# 로고와 타이틀을 위한 컬럼 분할 (1:8 비율)
-# 로고 쪽 비율을 0.8로 줄여서 제목에 더 붙게 시도
-logo_col, title_col = st.columns([0.8, 5]) 
-
-with logo_col:
-    if os.path.exists(LOGO_PATH):
-        # width=150을 유지합니다.
-        st.image(LOGO_PATH, width=250)
-    else:
-        st.empty() 
-
-with title_col:
-    # st.markdown을 사용하여 h1 제목을 출력 (CSS 마진 제거 적용)
-    st.markdown(f'<h1>{APP_TITLE}</h1>', unsafe_allow_html=True)
+# ⭐ 1. Page Configuration: Set title and change layout to 'wide' for full width ⭐
+st.set_page_config(
+    page_title="Employee Attendance Manager", 
+    layout="wide", 
+    initial_sidebar_state="expanded" # Start with sidebar expanded if present
+)
 
 
-st.markdown("""
-<style>
-
-/* --- 기존 스타일 그대로 유지하며, 전체화면 구조 절대 변경 없음 --- */
-
-/* 탭 리스트 전체: 브라우저 폭 꽉 채우기 */
-div[data-baseweb="tab-list"] {
-    display: flex !important;
-    justify-content: space-between !important;
-    width: 100% !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-    box-sizing: border-box;
-}
-
-/* 각 탭 버튼: 균등 분배 + 반응형 */
-button[data-baseweb="tab"] {
-    flex: 1 1 0 !important;
-    text-align: center !important;
-    font-size: 2.2rem !important;     /* 기존보다 2단계 크게 */
-    font-weight: 800 !important;
-    padding: 22px 0 !important;
-    border: none !important;
-    border-radius: 0 !important;
-    transition: background 0.2s ease;
-    background: green !important;     /* 비활성 탭: 녹색 */
-    color: black !important;          /* 비활성 탭 폰트: 검정 */
-}
-
-/* 선택된 탭 강조 */
-button[data-baseweb="tab"][aria-selected="true"] {
-    background: blue !important;      /* 활성 탭: 파란색 */
-    color: white !important;          /* 활성 탭 폰트: 흰색 */
-}
-
-/* 반응형: 폭이 좁아지면 세로 정렬 */
-@media (max-width: 768px) {
-    div[data-baseweb="tab-list"] {
-        flex-direction: column !important;
-    }
-    button[data-baseweb="tab"] {
-        width: 100% !important;
-    }
-}
-
-/* --- 출석 입력란 직원 이름 폰트 확대 (2단계) --- */
-.stTextInput label p,
-.stTextInput label,
-.stTextInput label span,
-.stTextInput label div {
-    font-size: 1.7rem !important;     
-    font-weight: 700 !important;
-    color: #003399 !important;        /* 진한 파랑 */
-}
-
-/* 입력 필드 내부 텍스트 크기 */
-.stTextInput input,
-.stTextArea textarea,
-.stSelectbox div[data-baseweb="select"] input {
-    font-size: 1.3rem !important;
-}
-
-/* --- Settings Management 하단 입력란 직원명 폰트 확대 (2단계) --- */
-section[data-testid="stSidebar"] label,
-div[data-testid="stVerticalBlock"] label,
-div[data-testid="stVerticalBlock"] p {
-    font-size: 1.5rem !important;
-    font-weight: 700 !important;
-}
-
-section[data-testid="stSidebar"] input,
-section[data-testid="stSidebar"] textarea,
-section[data-testid="stSidebar"] select {
-    font-size: 1.6rem !important;
-}
-
-/* --- 통계탭 내 그래프 크기 축소 (1/2 사이즈로) --- */
-.element-container:has(canvas),
-.element-container:has(svg) {
-    transform: scale(0.7) !important;     /* 그래프 전체 1/2로 축소 */
-    transform-origin: top center !important;
-}
-
-/* --- 1️⃣ 달력 셀 내부 텍스트 (작게 유지) --- */
-div[data-testid="stMarkdownContainer"].calendar-cell p {
-    font-size: 1.1rem !important;
-    line-height: 1.1rem !important;
-    color: #333 !important;
-}
-
-/* --- 2️⃣ Selected Date / Daily Memo 텍스트만 확대 --- */
-div[data-testid="stMarkdownContainer"]:not(.calendar-cell) h3,
-div[data-testid="stMarkdownContainer"]:not(.calendar-cell) h2,
-div[data-testid="stMarkdownContainer"]:not(.calendar-cell) p strong {
-    font-size: 1.5rem !important;
-    font-weight: 800 !important;
-    color: white !important;
-    line-height: 1.3 !important;
-}
-
-/* ====== Selected Date / Daily Memo 전용 스타일 (명확하고 안전) ====== */
-
-/* Selected Date 텍스트 (더 크게, 굵게) */
-.selected-date {
-    font-size: 1.2rem !important;       /* 원하시면 값 조정 가능 */
-    font-weight: 800 !important;
-    color: white !important;
-    margin-bottom: 0.5rem !important;
-}
-
-/* 내부의 strong 부분(날짜 값)을 약간 더 강조 */
-.selected-date strong {
-    font-size: 1.2rem !important;
-    font-weight: 900 !important;
-    color: white !important;
-
-}
-
-/* Daily Memo 제목 */
-.daily-memo {
-    font-size: 1.2rem !important;
-    font-weight: 800 !important;
-    color: white !important;
-    margin-top: 1rem !important;
-    margin-bottom: 0.4rem !important;
-}
-
-/* 모든 달력 셀 내 텍스트에 적용 (확실하게!) */
-div[data-testid="stMarkdownContainer"] p {
-    font-size: 16px !important;
-    line-height: 1.1 !important;
-    color: #333 !important;
-}
-
-/* --- 2️⃣ 탭 버튼 폰트 재보정 --- */
-button[data-baseweb="tab"] p {
-    font-size: 1.8rem !important;
-    font-weight: 800 !important;
-    color: black !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-
-
-
-
-
-if 'data_manager' not in st.session_state:
-    try:
-        st.session_state.data_manager = DataManager()
-    except Exception as e:
-        st.error(f"Data Manager Initialization Failed: {e}") 
-        st.stop()
-
-dm = st.session_state.data_manager
-ATTENDANCE_FILE = dm.ATTENDANCE_FILE 
-MEMO_COLUMN = dm.MEMO_COLUMN
-
-# ⭐ 세션 상태 초기화 ⭐
-today = date.today()
-if 'current_year' not in st.session_state:
-    st.session_state.current_year = today.year # Calendar Year/Monthly Stats Year
-if 'current_month' not in st.session_state:
-    st.session_state.current_month = today.month # Calendar Month/Monthly Stats Month
-if 'selected_date_str' not in st.session_state:
-    st.session_state.selected_date_str = today.strftime("%Y-%m-%d")
-
-# ⭐ New: Independent state for Yearly Stats Navigation (Fix 2) ⭐
-if 'stats_year' not in st.session_state:
-    st.session_state.stats_year = today.year
-
-# 월 이동 함수
-def _prev_month():
-    current_date = date(st.session_state.current_year, st.session_state.current_month, 1)
-    new_date = current_date.replace(day=1) - timedelta(days=1)
-    st.session_state.current_year = new_date.year
-    st.session_state.current_month = new_date.month
-
-def _next_month():
-    current_date = date(st.session_state.current_year, st.session_state.current_month, 1)
-    if st.session_state.current_month == 12:
-        st.session_state.current_year += 1
-        st.session_state.current_month = 1
-    else:
-        st.session_state.current_month += 1
-
-def _go_today():
-    today = date.today()
-    st.session_state.current_year = today.year
-    st.session_state.current_month = today.month
-    st.session_state.selected_date_str = today.strftime("%Y-%m-%d")
-
-# ... (나머지 도우미 함수: parse_raw_attendance_input, get_input_default_value, get_status_color, _on_day_click) ...
-def parse_raw_attendance_input(raw_input: str, standard_time: str) -> str:
+st.markdown(
     """
-    Converts raw_input (HH:MM or PV/CV/WO) to the final status string (ATT(HH:MM), LATE(HH:MM), PV, CV, WO).
-    """ 
-    text = raw_input.strip().upper()
-    if text in ["PV", "CV", "WO"]: return text
+    <style>
+    /* ... (기존 CSS 스타일 유지) ... */
+    
+    /* ⭐ 탭 폰트 크기 및 스타일 조정 ⭐ */
+    /* 탭 레이블을 포함하는 요소를 타겟팅합니다. */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 15px; /* 탭 간격 조절 */
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        /* 탭 자체의 패딩 조절 */
+        padding: 6px 15px; 
+    }
+    
+    .stTabs [data-baseweb="tab"] > div {
+        /* 탭 텍스트를 포함하는 내부 div를 타겟팅합니다. */
+        font-size: 20px !important; /* 폰트 크기를 16px로 강제 설정 */
+        font-weight: bold;         /* 폰트 굵게 설정 */
+        color: #FFFFFF !important;  /* 폰트 색상을 흰색으로 강제 설정 (선택 사항) */
+    }
+    
+    /* ... (기존 CSS 스타일 유지) ... */
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+
+# app.py 파일 내의 st.markdown("""<style>...</style>""") 블록을 아래와 같이 수정하세요.
+
+st.markdown(
+    """
+    <style>
+    /* ... 기존 탭 스타일은 생략 ... */
+    
+    /* 1. SAVE ALL, DELETE ALL 등 모든 st.button의 폰트 크기 강제 조정 */
+    /* 버튼 텍스트를 포함하는 내부 요소를 타겟팅합니다. */
+    .stButton > button {
+        /* 버튼 자체의 높이를 줄여 버튼 크기를 작게 만듭니다. */
+        height: 2.5em; /* 2em에서 약간 키워 가독성 확보 */
+        line-height: 1.5; 
+        padding: 0 10px; /* 내부 패딩을 줄여 버튼을 작게 */
+    }
+
+    /* 2. st.button 내부 텍스트에 font-size: 10px을 강제 적용 */
+    .stButton > button > div > p, /* Streamlit 1.x ~ 2.x 버전의 일반적인 텍스트 경로 */
+    .stButton > button > span {    /* 일부 환경/버전에서의 경로 */
+        font-size: 14px !important; /* 10px은 너무 작을 수 있으므로 14px로 권장 */
+        font-weight: bold;
+        line-height: 1.5;
+        white-space: nowrap; /* 텍스트가 줄바꿈되지 않도록 */
+    }
+    
+    /* SAVE ALL, DELETE ALL 버튼의 이모지 크기를 줄이는 것은 CSS로 어렵지만, 
+       텍스트 크기를 줄이면 상대적으로 작아 보입니다. */
+       
+    </style>
+    """, 
+    unsafe_allow_html=True
+)
+
+
+# ----------------------------------------------------
+# 1. CONSTANTS and SETUP
+# ----------------------------------------------------
+
+# (Synchronized with data_manager.py)
+ALL_STATUS_COLS = ["ATT", "LATE", "WO", "PEL", "ANL", "HAL", "SIL", "SPL", "EVL"]
+STATUS_COLORS = {
+    "ATT": "#4FC3F7", "LATE": "#F44336", "WO": "#FFFFFF", 
+    "PEL": "#FFC107", "ANL": "#00BCD4", "HAL": "#8BC34A", 
+    "SIL": "#9C27B0", "SPL": "#FF5722", "EVL": "#607D8B",
+    "NONE": "#1E1E1E" 
+}
+TARGET_CURRENCIES = [
+    "USD", "KRW", "IDR", "JPY", "EUR", 
+    "CNY", "GBP", "CAD", "AUD", "SGD"
+]
+CURRENCY_NAMES = {
+    "USD": "US Dollar", "KRW": "South Korean Won", "IDR": "Indonesian Rupiah",
+    "JPY": "Japanese Yen", "EUR": "Euro", "CNY": "Chinese Yuan",
+    "GBP": "British Pound", "CAD": "Canadian Dollar", "AUD": "Australian Dollar",
+    "SGD": "Singapore Dollar"
+}
+
+# Define all attendance status types
+ALL_ATTENDANCE_TYPES = ["hh:mm", "WO", "PEL", "ANL", "HAL", "SIL", "SPL", "EVL"]
+
+# Manual for each TYPE (English)
+TYPE_MANUAL = {
+    "hh:mm": "Time Input (e.g., 09:00):",
+    "WO": "Work Out ",
+    "PEL": "Personal Leave",
+    "ANL": "Annual Leave ",
+    "HAL": "Half-day Leave ",
+    "SIL": "Sick Leave ",
+    "SPL": "Special Leave ",
+    "EVL": "Event Leave"
+}
+
+# ----------------------------------------------------
+# 2. STATE INITIALIZATION (Session State Management)
+# ----------------------------------------------------
+
+# 1. Initialize keys to None to prevent KeyError
+if 'dm' not in st.session_state:
+    st.session_state['dm'] = None
+if 'se' not in st.session_state:
+    st.session_state['se'] = None
+
+# 2. Attempt only if DataManager has not been successfully loaded yet
+if st.session_state['dm'] is None:
     try:
-        if ':' not in text and text.isdigit():
-            if len(text) == 3: text = '0' + text
-            if len(text) == 4: text = text[:2] + ':' + text[2:]
-            else: raise ValueError("Not a recognizable time format")
-
-        time_obj = datetime.strptime(text, '%H:%M').time()
-        input_time = time_obj.strftime('%H:%M')
-
-        standard_dt = datetime.strptime(standard_time, '%H:%M')
-        input_dt = datetime.strptime(input_time, '%H:%M')
-
-        if input_dt <= standard_dt:
-            return f"ATT({input_time})"
-        else:
-            return f"LATE({input_time})"
-
-    except (ValueError, IndexError, TypeError):
-        return f"ATT({standard_time})"
-
-def get_input_default_value(full_status: str, standard_time: str) -> str:
-    """Extracts the default value to display in the input field from the existing status string.""" 
-    if not isinstance(full_status, str): return standard_time
-    
-    status_only = full_status.split('(')[0] if '(' in full_status else full_status
-    time_only = full_status.split('(')[1].strip(')') if '(' in full_status and ')' in full_status else standard_time
-    
-    if status_only.upper() in ["PV", "CV", "WO"]:
-        return status_only
-    else:
-        return time_only
-
-def get_status_color(status):
-    """Returns text color based on attendance status.""" 
-    if status.startswith('ATT'): return '#90EE90' # LightGreen
-    if status.startswith('LATE'): return '#FFA07A' # LightSalmon
-    if status in ['WO', 'PV', 'CV']: return '#FFD700' # Gold
-    return '#FFFFFF' # White
-
-def _on_day_click(day, year, month):
-    selected_date = date(year, month, day)
-    st.session_state.selected_date_str = selected_date.strftime("%Y-%m-%d")
+        # Attempt DataManager initialization
+        st.session_state['dm'] = DataManager()
+        
+        # Initialize StatisticsExporter upon successful DataManager initialization
+        st.session_state['se'] = StatisticsExporter(st.session_state['dm'])
+        
+    except Exception as e:
+        # Keep both dm and se as None and display error message on initialization failure
+        st.error(f"Data Manager Initialization Error. Check file permissions and paths: {e}")
+        st.session_state['dm'] = None
+        st.session_state['se'] = None 
 
 
-# --- 4. Calendar Rendering Function (render_calendar은 변경 없음) ---
-def render_calendar(dm):
-    
-    year = st.session_state.current_year
-    month = st.session_state.current_month
-    today_str = date.today().strftime("%Y-%m-%d")
-    
-    HOLIDAY_BG_COLOR = "#6B1F1F" 
+# Initialize calendar state
+if 'current_year' not in st.session_state:
+    st.session_state['current_year'] = date.today().year
+if 'current_month' not in st.session_state:
+    st.session_state['current_month'] = date.today().month
+if 'selected_date' not in st.session_state:
+    st.session_state['selected_date'] = date.today().strftime("%Y-%m-%d")
 
-    # 1. Navigation Header
-    col_prev, col_title, col_next, col_today = st.columns([1, 4, 1, 1])
-    col_prev.button("◀ Previous Month", on_click=_prev_month, use_container_width=True)
-    
-    col_title.markdown(f"<h3 style='text-align: center; color: #4FC3F7;'>{date(year, month, 1).strftime('%B %Y')}</h3>", unsafe_allow_html=True) 
-    
-    col_next.button("Next Month ▶", on_click=_next_month, use_container_width=True)
-    col_today.button("Today", on_click=_go_today, type="primary", use_container_width=True)
-
-    # 2. Weekday Header
-    week_cols = st.columns(7)
-    day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] 
-    for i, day_name in enumerate(day_names):
-        color = 'red' if i in [0, 6] else 'white'
-        week_cols[i].markdown(
-            f"<p style='text-align: center; color: {color}; font-weight: bold;'>{day_name}</p>",
-            unsafe_allow_html=True
-        )
-
-    # 3. Calendar Data Generation
-    cal_iterator = pycal.Calendar(pycal.SUNDAY)
-    month_days_with_weekday = list(cal_iterator.itermonthdays2(year, month))
-    
-    # 4. Calendar Rendering
-    
-    for r in range(0, len(month_days_with_weekday), 7):
-        week = month_days_with_weekday[r:r+7]
-        if not week: break
-
-        day_cols = st.columns(7)
-        for i, (day, weekday) in enumerate(week):
-            
-            day_cols[i].empty()
-            
-            is_current_month = (day != 0)
-            target_date = None
-
-            if day == 0:
-                if r == 0: 
-                    first_day_weekday = week[0][1]
-                    target_date = date(year, month, 1) - timedelta(days=first_day_weekday - i)
-                else: 
-                    days_in_current_month = pycal.monthrange(year, month)[1]
-                    days_into_next_month = i - (7 - (len(month_days_with_weekday) - r))
-                    target_date = date(year, month, days_in_current_month) + timedelta(days=days_into_next_month + 1)
-                    
-                date_str = target_date.strftime("%Y-%m-%d")
-                day_display = str(target_date.day)
-                
-            else:
-                current_date = date(year, month, day)
-                date_str = current_date.strftime("%Y-%m-%d")
-                day_display = str(day)
-                target_date = current_date
-
-            
-            is_selected = date_str == st.session_state.selected_date_str
-            is_today = date_str == today_str
-            
-            holiday_name = dm.get_holiday_name(date_str)
-            is_holiday = holiday_name is not None
-            
-            if is_selected:
-                bg_color = "#2E7D32" 
-            elif is_holiday: 
-                bg_color = HOLIDAY_BG_COLOR
-            elif is_today:
-                bg_color = "#01579B"
-            elif not is_current_month: 
-                bg_color = "#121212" 
-            else:
-                bg_color = "#1E1E1E"
+# Assign to global variables (now safe)
+dm = st.session_state['dm']
+se = st.session_state['se']
 
 
-            day_records = dm.attendance_data.get(date_str, {})
-            attendance_info_list = []
-            
-            for emp in dm.settings.get('employees', []):
-                v = day_records.get(emp)
-                if v and v != dm.MEMO_COLUMN:
-                    status_name = v.split('(')[0]
-                    color = get_status_color(status_name)
-                    
-                    display_text = f"<span style='color:white;'>{emp}</span>"
-                    if '(' in v:
-                        time_part = v.split('(')[1].strip(')')
-                        display_text += f": <span style='color:{color};'>{time_part}</span>" 
-                    else:
-                        display_text += f": <span style='color:{color};'>{status_name}</span>" 
-                    
-                    attendance_info_list.append(
-                        f"<p style='margin:0; line-height:1.2; font-size:14px !important;'>{display_text}</p>"
-                    )
-            
-            holiday_html = ""
-            if holiday_name:
-                holiday_html = f"<p style='color:#FFCCCC; font-size:16px; font-weight:bold; margin:0;'>{holiday_name}</p>"
+# C:\Users\user\Desktop\Cursor\Gemini\Result\_TEI_attendance_web_v5\app.py
 
-            if attendance_info_list:
-                records_html = holiday_html + "".join(attendance_info_list)
-            elif holiday_name:
-                records_html = holiday_html
-            else:
-                records_html = "<p style='color:grey; font-size:14px; margin:0;'>No Record</p>"
+# ... (Existing code omitted)
 
-            today_tag = f'<div style="color:#4FC3F7; font-size:12px;">(Today)</div>' if is_today else ''
-            
-            day_color = "white" if is_current_month else "#AAAAAA" 
-
-            with day_cols[i]:
-                st.markdown(
-                    f'<div id="day_cell_{date_str}" style="background-color:{bg_color}; border-radius:10px; padding:2px; text-align:left; overflow:hidden;">'
-                    f'<div style="color:{day_color}; font-weight:bold; font-size:16px;">{day_display}</div>'
-                    f'{today_tag}'
-                    f'<div>{records_html}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-                
-                st.button(
-                    " ", 
-                    key=f"btn_day_{date_str}",
-                    on_click=_on_day_click,
-                    args=(target_date.day, target_date.year, target_date.month),
-                    use_container_width=True
-                )
-# --- render_calendar function end ---
-
-
-# --- 5. UI Configuration (Tabs) ---
-# st.title(APP_TITLE)  <-- ⭐ 이 줄을 삭제합니다. ⭐
-st.markdown(f"Standard Check-in Time: **{dm.attendance_standard_time}** | Number of Employees: **{len(dm.employees)}**")
-
-tab1, tab2, tab3 = st.tabs(["📅 Attendance", "📊 Statistics", "⚙ Settings"]) 
-
-# --------------------------------------------------------------------------------------------------
-# Tab 1: Attendance (로직 변경 없음)
-# --------------------------------------------------------------------------------------------------
-with tab1:
-    st.header("Attendance Record and Input")
-
-    col_input, col_calendar = st.columns([1.0, 3.0])
-
-    with col_calendar:
-        render_calendar(dm)
-
-    selected_date_str = st.session_state.selected_date_str
-
-    with col_input:
-
-        # Selected Date — 클래스를 붙여서 명확히 타겟팅
-        st.markdown(
-            f"<div class='selected-date'>Selected Date: <strong>{selected_date_str}</strong></div>",
-            unsafe_allow_html=True
-        )
-
-        records = dm.get_day_records(selected_date_str)
-
-        with st.form(key='attendance_form', clear_on_submit=False):
-
-            st.markdown("##### Employee Status Input (HH:MM, H:MM or PV, CV, WO)")
-            employee_raw_inputs = {}
-
-            cols = st.columns(1)
-            col = cols[0]
-
-            for i, emp in enumerate(dm.employees):
-
-                full_status = records.get(emp, f"ATT({dm.attendance_standard_time})")
-                input_default = get_input_default_value(full_status, dm.attendance_standard_time)
-
-                with col:
-                    input_text = st.text_input(
-                        label=f"**{emp}**",
-                        value=input_default,
-                        key=f"{emp}_input_{selected_date_str}"
-                    )
-
-                    employee_raw_inputs[emp] = input_text
-
-            st.markdown("---")
-            st.markdown("<div class='daily-memo'>Daily Memo</div>", unsafe_allow_html=True)
-            default_memo = records.get(MEMO_COLUMN, "")
-            memo = st.text_area(
-                "Enter Memo",
-                default_memo,
-                key=f'memo_{selected_date_str}'
-            )
-
-            col_save, col_delete = st.columns(2)
-
-            submitted = col_save.form_submit_button("✅ Save Record", type="primary", use_container_width=True)
-            deleted = col_delete.form_submit_button("🗑️ Delete Record", use_container_width=True)
-
-            if submitted:
-                final_records = {}
-                for emp, raw_input in employee_raw_inputs.items():
-                    final_records[emp] = parse_raw_attendance_input(raw_input, dm.attendance_standard_time)
-
-                dm.save_attendance_record(selected_date_str, final_records, memo)
-                st.success(f"Record for **{selected_date_str}** saved successfully.")
-
-            if deleted:
-                if st.session_state.get(f'confirm_delete_{selected_date_str}', False):
-                    if selected_date_str in dm.attendance_data:
-                        del dm.attendance_data[selected_date_str]
-                        dm._save_attendance_data()
-                        st.success(f"Record for **{selected_date_str}** deleted successfully.")
-                        st.session_state[f'confirm_delete_{selected_date_str}'] = False
-                    else:
-                        st.warning("No record to delete.")
-                        st.session_state[f'confirm_delete_{selected_date_str}'] = False
-
-                else:
-                    st.session_state[f'confirm_delete_{selected_date_str}'] = True
-                    st.warning("⚠️ **Are you sure you want to delete?** Press 'Delete Record' again.")
-
-
-
-# --------------------------------------------------------------------------------------------------
-# Tab 2: Statistics (수정 완료)
-# --------------------------------------------------------------------------------------------------
-
-# --- 그래프 렌더링 함수 (Fix 1, Fix 3 포함) ---
-def render_stats_section(df: pd.DataFrame, title_suffix: str):
-    """그룹화된 막대 그래프를 렌더링하고 Excel 다운로드 버튼을 표시합니다."""
-    
-    st.subheader(f"Attendance Status Visualization: {title_suffix}")  
-    
-    if df.empty or 'Employee' not in df.columns or len(df.index) == 0:
-        st.info(f"No records available for {title_suffix}.")
-        # 엑셀 다운로드 버튼도 표시하지 않음
-        st.markdown("---")
+def save_multi_attendance():
+    """Batch saves attendance records (time or TYPE) and memo for each employee using DataManager."""
+    selected_date = st.session_state.get('selected_date')
+    if not selected_date:
+        st.error("No date has been selected.")
         return
 
-    # 'Employee' 열을 인덱스로 설정하고 'Total' 열은 드롭
-    try:
-        chart_data = df.set_index('Employee').drop(columns=['Total'], errors='ignore')
-    except KeyError:
-        chart_data = df.set_index('Employee')
-
-    # 1. 데이터 준비 및 설정 (이전과 동일)
-    categories = chart_data.columns.tolist() 
-    employees = chart_data.index.tolist()
-    data = chart_data.values 
-
-    x = np.arange(len(employees))  
-    width = 0.15 
-
-    colors = {
-        'ATT': '#34A853', # Green
-        'LATE': '#FBBC05', # Yellow
-        'WO': '#EA4335', # Red
-        'CV': '#4285F4', # Blue
-        'PV': '#A142F4'  # Purple
-    }
+    employees = dm.get_employee_list()
+    data_to_save = {}
     
-    # 2. Figure 생성 및 배경색 설정 (크기 절반, 배경 옅은 블랙)
-    fig, ax = plt.subplots(
-        figsize=(5, 2.5), 
-        # ⭐ 1차 수정: constrained_layout=True 추가 (레이아웃 잘림 방지) ⭐
-        constrained_layout=True 
-    ) 
-    
-    fig.patch.set_facecolor('#333333') 
-    ax.set_facecolor('#333333')        
-    
-    text_color = 'white'
-    ax.tick_params(axis='x', colors=text_color, labelsize=8) 
-    ax.tick_params(axis='y', colors=text_color, labelsize=8) 
-    ax.yaxis.label.set_color(text_color)        
-    ax.title.set_color(text_color)              
-    
-    # 3. 막대 그리기
-    for i, category in enumerate(categories):
-        offset = x - (len(categories) / 2 - i) * width 
-        ax.bar(offset, data[:, i], width, label=category, color=colors.get(category))
-
-    # 4. 축 레이블 및 제목 설정
-    ax.set_xticks(x)
-    ax.set_xticklabels(employees, rotation=0, ha='center', fontsize=8) 
-    ax.set_ylabel('Count', fontsize=8) 
-    ax.set_title(f"{title_suffix} Attendance Status", fontsize=10) 
-    
-    # 막대 그래프 상단에 숫자 카운터 표시
-    for container in ax.containers:
-        ax.bar_label(container, label_type='edge', color='white', fontsize=8)
-
-    # ⭐ 2차 수정: Y축 범위 조정 (숫자 카운터 잘림 방지) ⭐
-    # y축의 범위 조정 
-    if not df.empty and not df.drop('Employee', axis=1).empty:
-        max_val = df.drop('Employee', axis=1).values.max()
-        # 1.15를 1.30으로 수정하여 충분한 여백 확보
-        ax.set_ylim(top=max_val * 1.30) 
-    
-    # ⭐ 범례 위치 Fix (Fix 1: 우측에 세로로) ⭐
-    # bbox_to_anchor와 loc='center left'를 사용하여 Axes 외부에 배치
-    legend = ax.legend(
-        bbox_to_anchor=(1.05, 0.5), # Axes의 오른쪽 중앙 (1.05)에 배치
-        loc='center left',            # 범례의 왼쪽 중앙을 앵커에 맞춤
-        ncol=1,                       # 세로 한 줄로 나열
-        facecolor='#333333',
-        edgecolor='white',
-        fontsize=7, 
-        title='Status'
-    )
-    plt.setp(legend.get_texts(), color=text_color) 
-    plt.setp(legend.get_title(), color=text_color)
-    
-    plt.tight_layout()
-
-    # 5. Streamlit에 Matplotlib 그래프 표시
-    st.pyplot(fig)
-    
-    # ---------------------------------------------
-    # ⭐ Excel Export (Fix 2: 그래프 이미지 포함) ⭐
-    # ---------------------------------------------
-    
-    # 그래프를 PNG 이미지로 메모리에 저장
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format='png', bbox_inches='tight', facecolor='#333333')
-    img_buffer.seek(0)
-    
-    plt.close(fig) # 메모리 누수 방지
-
-    # Pandas ExcelWriter를 사용하여 DataFrame을 쓰고 이미지를 삽입
-    excel_buffer = io.BytesIO()
-    
-    # writer 객체 생성 (openpyxl 엔진 사용)
-    writer = pd.ExcelWriter(excel_buffer, engine='openpyxl')
-    
-    # 1. 통계 데이터 DataFrame 쓰기
-    df.to_excel(writer, index=False, sheet_name='Statistics Data')
-    
-    # 2. 이미지 삽입 로직
-    try:
-        workbook = writer.book
-        worksheet = writer.sheets['Statistics Data']
-
-        # PIL Image 객체 생성
-        img = Image.open(img_buffer)
+    # ----------------------------------------------------------------------
+    # ⭐ Core Fix: Extract value and determine status from a single input field (emp_input_i) ⭐
+    # ----------------------------------------------------------------------
+    for i, emp in enumerate(employees):
+        input_key = f'emp_input_{i}'
+        raw_input = (st.session_state.get(input_key) or "").strip().upper()
+        final_record = None
         
-        # Openpyxl 이미지 객체 생성 및 크기 조절 (원본 크기)
-        from openpyxl.drawing.image import Image as OpenpyxlImage
-        openpyxl_img = OpenpyxlImage(img)
+        if not raw_input:
+            continue 
 
-        # 이미지 삽입 위치 지정 (예: 데이터 테이블 아래 B2 셀에서 시작한다고 가정, A열은 비워둠)
-        # 데이터가 끝난 후 한 칸 띄어서 삽입
-        image_insert_row = len(df) + 3
-        
-        # 이미지 삽입 (C3 셀부터 시작)
-        worksheet.add_image(openpyxl_img, f'C{image_insert_row}') 
-        
-    except ImportError:
-        # openpyxl이 없으면 이미지를 삽입하지 못하고 경고를 표시합니다.
-        st.warning("Cannot embed graph image: 'openpyxl' is required. Data will be saved without the graph.")
-    except Exception as e:
-        st.error(f"Error embedding image in Excel: {e}")
-        
-    # writer 저장
-    writer.close()
-    excel_buffer.seek(0)
-        
-    st.download_button(
-        label=f"Download {title_suffix} Data & Graph (Excel)", 
-        data=excel_buffer,
-        file_name=f'attendance_{title_suffix.replace(" ", "_").replace("(", "").replace(")", "")}_stats.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        type='primary'
-    )
-
-
-
-with tab2:
-    st.title("📊 Attendance Statistics")
-
-    if not dm.employees or not dm.attendance_data:
-        st.warning("No employees or attendance records found to generate statistics.")
-    
-    else: 
-        
-        # ---------------------------------------------
-        # 1. Monthly Data (월별 통계)
-        # ---------------------------------------------
-        current_month_date = date(st.session_state.current_year, st.session_state.current_month, 1)
-        st.header(f"📅 Monthly Data: {current_month_date.strftime('%Y년 %m월')}")
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col1:
-            st.button("⬅️ Previous Month", on_click=_prev_month, key="stat_prev_month")
-        with col3:
-            st.button("Next Month ➡️", on_click=_next_month, key="stat_next_month")
-
-        month_start = current_month_date
-        next_month = month_start.replace(day=28) + timedelta(days=4)
-        month_end = next_month.replace(day=1) - timedelta(days=1)
-        
-        monthly_stats_df = dm.calculate_stats(month_start, month_end)
-        render_stats_section(monthly_stats_df, "Monthly Data")
-
-        # ---------------------------------------------
-        # 2. Yearly Data (연간 통계 - Fix 2 적용: stats_year 사용)
-        # ---------------------------------------------
-        st.header(f"🗓️ Yearly Data: {st.session_state.stats_year}년")
-
-        col_y1, col_y2, col_y3 = st.columns([1, 2, 1])
-        with col_y1:
-            # ⭐ Fix 2: stats_year만 업데이트 ⭐
-            st.button("⬅️ Previous Year", on_click=lambda: st.session_state.__setitem__('stats_year', st.session_state.stats_year - 1), use_container_width=True, key="prev_year_btn")
-        with col_y3:
-            # ⭐ Fix 2: stats_year만 업데이트 ⭐
-            st.button("Next Year ➡️", on_click=lambda: st.session_state.__setitem__('stats_year', st.session_state.stats_year + 1), use_container_width=True, key="next_year_btn")
-
-        # ⭐ Fix 2: stats_year를 사용하여 계산 ⭐
-        year_start = date(st.session_state.stats_year, 1, 1)
-        year_end = date(st.session_state.stats_year, 12, 31)
-        
-        yearly_stats_df = dm.calculate_stats(year_start, year_end)
-        render_stats_section(yearly_stats_df, "Yearly Data")
-
-        # ---------------------------------------------
-        # 3. Overall Data (전체 통계)
-        # ---------------------------------------------
-        st.header("🌐 Overall Data (Total)")
-        overall_stats_df = dm.calculate_stats()
-        render_stats_section(overall_stats_df, "Overall Data (Total)")
-
-# --------------------------------------------------------------------------------------------------
-# Tab 3: Settings (로직 변경 없음)
-# --------------------------------------------------------------------------------------------------
-with tab3:
-    st.header("Settings Management") 
-    
-    with st.form(key='settings_form'):
-        
-        st.markdown("**Standard Check-in Time**") 
-        new_attendance_time_str = st.text_input(
-            "Check-in Time (HH:MM format, e.g., 08:30)", 
-            dm.attendance_standard_time
-        )
-        
-        st.markdown("**Employee List (one per line)**") 
-        employees_str = "\n".join(dm.employees)
-        new_employees_str = st.text_area(
-            "Employee Names", 
-            employees_str,
-            height=300 # 원하는 픽셀 값으로 조정하세요 (예: 150, 200, 250 등)
-        )
-        
-        settings_submitted = st.form_submit_button("Save and Apply Settings", type="primary") 
-        
-        if settings_submitted:
-            new_employees = [e.strip() for e in new_employees_str.split('\n') if e.strip()]
+        # 1. Check HH:MM format (Time Input)
+        if re.match(r"^\d{1,2}:\d{2}$", raw_input):
+            time_input = raw_input
             
+# Retain ATTRIBUTE ERROR fix logic implemented inline in the previous step
             try:
-                datetime.strptime(new_attendance_time_str, '%H:%M')
-            except ValueError:
-                st.error("Invalid time format. Please use HH:MM.") 
-                st.stop()
-
-            # ⭐ 1. 변경 전 출근 기준 시간 저장 ⭐
-            old_attendance_time = dm.attendance_standard_time
+                # 1. Load standard time from settings (standard_time_str variable unified)
+                standard_time_str = dm.settings.get('attendance_time', '09:00')
+                today_date = date.today().strftime("%Y-%m-%d")
                 
-            # 2. 새로운 설정 저장 (dm 내부의 설정 및 standard time 갱신)
-            dm.save_new_settings(new_attendance_time_str, new_employees)
+                # Parse input time
+                # ⭐ Modification: Use dt_class.strptime instead of datetime ⭐
+                input_dt = dt_class.strptime(
+                    f"{today_date} {time_input}",
+                    "%Y-%m-%d %H:%M" 
+                )
+                
+                # Parse standard time
+                # ⭐ Modification: Use dt_class.strptime and standard_time_str variable ⭐
+                standard_dt = dt_class.strptime(
+                    f"{today_date} {standard_time_str}", 
+                    "%Y-%m-%d %H:%M"
+                )
+
+                if input_dt <= standard_dt:
+                    status = "ATT"
+                else:
+                    status = "LATE"
+                    
+                # final_record example: "ATT(09:00)" or "LATE(09:15)"
+                final_record = f"{status}({time_input})"
             
-            # ⭐ 3. 출근 기준 시간이 변경된 경우, 전체 기록 재계산 및 RERUN ⭐
-            if new_attendance_time_str != old_attendance_time:
-                # 3-1. 기존 데이터 재계산 (저장된 ATT/LATE 상태 문자열을 업데이트)
-                dm.recalculate_all_attendance(new_attendance_time_str)
-                st.success(f"Settings saved successfully. All **{len(dm.attendance_data)}** attendance records re-evaluated based on new standard time **{new_attendance_time_str}**.") 
-                # 3-2. Streamlit 강제 재실행 (UI/캘린더의 재로드 시 재계산된 데이터 반영)
-                st.rerun() 
-            else:
-                st.success("Settings saved successfully.") 
+            # Defensive logic against time format errors and system errors (Optional)
+            except ValueError:
+                final_record = f"ERROR(Format:{time_input})"
+            except Exception:
+                final_record = f"ERROR(System)"
+
+                return
             
-    st.markdown("---")
-    st.subheader("Download Existing Data Files") 
+        # 2. Check TYPE format (WO, ANL, etc.)
+        elif raw_input in ALL_ATTENDANCE_TYPES[1:]: # Exclude hh:mm
+            # final_record example: "WO" or "ANL"
+            final_record = raw_input
+            
+        # 3. Invalid Input
+        else:
+            st.error(f"❌ Input value '{raw_input}' for {emp} is not a valid time (HH:MM) or TYPE. Stopping save.")
+            return
+
+        if final_record:
+            # ⭐ Modification: Store the final status/time to be saved in final_record to data_to_save ⭐
+            data_to_save[emp] = final_record
     
-    if os.path.exists(ATTENDANCE_FILE):
-        with open(ATTENDANCE_FILE, "rb") as file:
-            st.download_button(
-                label=f"Download '{ATTENDANCE_FILE}'", 
-                data=file,
-                file_name=ATTENDANCE_FILE,
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
+    # ----------------------------------------------------
+    # 2. Memory Update and Final Save Trigger (Core Modified Section)
+    # ----------------------------------------------------
+    
+    memo_key = f'memo_{selected_date}'
+    memo_text = st.session_state.get(memo_key, "").strip() # Remove whitespace
+    
+    current_day_data = dm.attendance_data.get(selected_date, {})
+    old_memo_text = current_day_data.get('__MEMO__', "")
+
+    # Check if record and memo have changed
+    memo_changed = (old_memo_text != memo_text)
+    record_changed = bool(data_to_save) # If data_to_save has anything, the record changed
+    
+    if record_changed or memo_changed: # If data to save (attendance/memo) has changed
+        
+        # 2-1. Initialize data for that date (if necessary)
+        if selected_date not in dm.attendance_data:
+            dm.attendance_data[selected_date] = {}
             
-    SETTINGS_FILE = 'settings.json'
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "rb") as file:
-            st.download_button(
-                label=f"Download '{SETTINGS_FILE}'", 
-                data=file,
-                file_name=SETTINGS_FILE,
-                mime='application/json'
+        # 2-2. Update Memo (Memory)
+        if memo_text:
+            dm.attendance_data[selected_date]['__MEMO__'] = memo_text
+        elif '__MEMO__' in dm.attendance_data[selected_date]:
+            del dm.attendance_data[selected_date]['__MEMO__']
+            
+        # 2-3. Update Attendance Record (Memory) - Directly update instead of dm.save_attendance_record
+        for emp, record in data_to_save.items():
+            dm.attendance_data[selected_date][emp] = record
+            
+        # 2-4. Force save Excel file (Run only once after memory update is complete)
+        dm.save_internal_data() 
+            
+        st.success(f"Attendance records ({len(data_to_save)} items) and memo for {selected_date} successfully saved.")
+    else:
+        st.warning(f"No attendance records or memo content to save.")
+        
+    # st.rerun() # Keep removed state as before
+
+
+# ... (Remaining existing code omitted)
+
+
+
+def delete_multi_attendance():
+    """Deletes all attendance records and memo for the selected date."""
+    selected_date = st.session_state.get('selected_date')
+    if not selected_date:
+        st.error("No date has been selected.")
+        return
+    
+    # Delete all records for the date from DataManager
+    dm.delete_all_attendance(selected_date)
+    
+    # ⭐ Delete Memo (Directly manipulate dm.attendance_data)
+    if selected_date in dm.attendance_data and '__MEMO__' in dm.attendance_data[selected_date]:
+        del dm.attendance_data[selected_date]['__MEMO__']
+    
+    st.success(f"🗑️ All attendance records and memo for {selected_date} have been deleted.")
+    # ⭐ Remove st.rerun() call. (Fixes no-op warning within callback function)
+    # st.rerun()
+
+# ----------------------------------------------------
+# 3. HELPER FUNCTIONS
+# ----------------------------------------------------
+
+def change_month(offset):
+    """Moves the calendar to the previous/next month."""
+    st.session_state['current_month'] += offset
+    if st.session_state['current_month'] > 12:
+        st.session_state['current_month'] = 1
+        st.session_state['current_year'] += 1
+    elif st.session_state['current_month'] < 1:
+        st.session_state['current_month'] = 12
+        st.session_state['current_year'] -= 1
+    st.session_state['selected_date'] = None
+    #st.rerun() 
+
+def select_date(day):
+    """Selects the clicked date and loads the input field data.""" 
+    if day:
+        date_str = f"{st.session_state['current_year']}-{st.session_state['current_month']:02d}-{day:02d}"
+        st.session_state['selected_date'] = date_str
+        
+        # ⭐ Logic to update input field values when a date is selected ⭐
+        if dm:
+            day_map = dm.attendance_data.get(date_str, {})
+            employees = dm.get_employee_list()
+
+            for i, emp in enumerate(employees):
+                input_key = f'emp_input_{i}'
+                current_record = day_map.get(emp)
+                
+                # Extract HH:MM from ATT(HH:MM) or LATE(HH:MM)
+                if '(' in str(current_record) and ')' in str(current_record):
+                    value = current_record.split('(')[-1].strip(')')
+                elif isinstance(current_record, str):
+                    # TYPE such as WO, ANL, etc.
+                    value = current_record.strip()
+                else:
+                    value = "" # Empty string if no record
+
+                # Set form field value by directly updating Streamlit's Session State
+                st.session_state[input_key] = value
+
+            # Update memo input field value
+            memo_key = f'memo_{date_str}'
+            # ⭐ Modification: Retrieve memo directly using the '__MEMO__' key from dm.attendance_data instead of dm.get_memo. ⭐
+            current_memo = dm.attendance_data.get(date_str, {}).get('__MEMO__', "")
+            
+            st.session_state[memo_key] = current_memo        
+    else:
+        st.session_state['selected_date'] = None
+
+def get_current_record(emp_name):
+    """Gets the employee's record for the selected date."""
+    date_str = st.session_state.get('selected_date')
+    if not date_str or not dm:
+        return None
+    
+    return dm.attendance_data.get(date_str, {}).get(emp_name)
+
+def save_attendance():
+    # This function is superseded by save_multi_attendance, but the existing code is retained.
+    if not dm or not st.session_state['selected_date']:
+        st.warning("Please select a date or ensure Data Manager (dm) is ready.")
+        return
+
+    selected_date = st.session_state['selected_date']
+    emp_name = st.session_state['emp_selector']
+    status = st.session_state['status_radio']
+    time_str = st.session_state['check_in_time']
+    
+    if emp_name == "Select an Employee":
+        st.error("You must select an employee to record for.")
+        return
+        
+    if status in ['ATT', 'LATE'] and (not time_str or len(time_str.split(':')) != 2 or not time_str.replace(':', '').isdigit()):
+        st.error("Attendance/Late status requires a valid time input. (e.g., 09:00)")
+        return
+        
+    dm.save_attendance_record(selected_date, emp_name, status, time_str)
+    
+    st.success(f"Record for {emp_name} on {selected_date} successfully saved.")
+    st.rerun() 
+    
+def fetch_exchange_rates():
+    """Calls the exchange rate API and saves the result to the session state."""
+    API_URL = "https://open.er-api.com/v6/latest/USD"
+    
+    st.session_state['exchange_rates'] = None
+    st.session_state['exchange_status'] = "Status: Fetching..."
+    st.session_state['exchange_time'] = ""
+
+    try:
+        response = requests.get(API_URL, timeout=5)
+        response.raise_for_status() 
+        data = response.json()
+        
+        if data.get('result') == 'success':
+            rates = {
+                curr: data['rates'].get(curr) 
+                for curr in TARGET_CURRENCIES if data['rates'].get(curr) is not None
+            }
+            st.session_state['exchange_rates'] = rates
+            st.session_state['exchange_status'] = "Status: Last updated at " + data.get('time_last_update_utc', 'N/A')
+            st.session_state['exchange_time'] = data.get('time_last_update_utc', '')
+
+        else:
+            st.session_state['exchange_status'] = "Status: API Call Failed"
+            st.error("Failed to call the exchange rate API.")
+
+    except requests.exceptions.RequestException as e:
+        st.session_state['exchange_status'] = f"Status: Network Error"
+        st.error(f"Network Error: {e}")
+    except Exception as e:
+        st.session_state['exchange_status'] = f"Status: Unknown Error"
+        st.error(f"An unexpected error occurred: {e}")
+        
+def generate_pdf_for_download(api_type, year, month):
+    """Creates a BytesIO object for the PDF download button."""
+    try:
+        buffer = io.BytesIO()
+        temp_path = "temp_report.pdf"
+        
+        # Call StatisticsExporter's PDF generation method (temporarily save to file system)
+        se.generate_pdf_summary(temp_path, api_type, year, month)
+        
+        with open(temp_path, "rb") as f:
+            buffer.write(f.read())
+        
+        os.remove(temp_path) 
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        st.error(f"A fatal error occurred while generating the PDF: {e}")
+        return None
+
+def generate_excel_for_download(api_type, year, month):
+    """Creates a BytesIO object for the Excel download button."""
+    try:
+        buffer = io.BytesIO()
+        temp_path = "temp_report.xlsx"
+        
+        # Call StatisticsExporter's Excel generation method
+        se.export_excel_report(temp_path, api_type, year, month)
+        
+        with open(temp_path, "rb") as f:
+            buffer.write(f.read())
+            
+        os.remove(temp_path)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        st.error(f"A fatal error occurred while generating the Excel: {e}")
+        return None
+
+
+# ----------------------------------------------------
+# 4. UI COMPONENTS (Tabs)
+# ----------------------------------------------------
+
+# (Streamlit Main Configuration)
+st.set_page_config(
+    page_title="Employee Attendance Management Web Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- Header ---
+# ⭐ Modification 1: Use Markdown H4 tag instead of st.title (Reduced font size) ⭐
+# ⭐ Modification 2: Set CSS margin-top: -15px, margin-bottom: 0 to minimize vertical space ⭐
+# --- Header ---
+st.markdown(
+    """
+    <h4 style='
+    	margin-top: -15px; 
+    	margin-bottom: 0; 
+    	text-align: center; /* ⭐ Added this line for center alignment ⭐ */
+    	font-size: 35px; /* ⭐ Font size modification (e.g., 28px) ⭐ */
+    	color: #4FC3F7;   /* ⭐ Added font color (e.g., light blue) ⭐ */
+    	font-weight: bold; /* Keep bold */
+    '>
+    	👨‍💻 Employee Attendance Management System
+    </h4>
+    """,
+    unsafe_allow_html=True
+)
+# ⭐ Modification 3: Minimize top/bottom margin of the horizontal rule (hr) as well ⭐
+st.markdown("<hr style='margin-top: 5px; margin-bottom: 5px;'>", unsafe_allow_html=True)
+
+# Do not draw UI if DataManager is not loaded.
+if not dm:
+    st.warning("Data Manager load failed: Please register the employee list in the Settings tab and check file permissions to ensure necessary files (settings.json, attendance.json) can be created.")
+    st.stop()
+
+# --- Tabs ---
+tab1, tab2, tab3, tab4 = st.tabs(["🗓️ Attendance Record Entry", "📊 Statistics/Reports", "⚙️ Settings", "💵 Exchange Rate Inquiry"])
+
+# ----------------------------------------------------
+# TAB 1: Attendance Record (Implementation in AttendanceView_calendar_ctk.py)
+# ----------------------------------------------------
+with tab1:
+
+    # CSS for vertical expansion of the calendar column (does not affect the entire page)
+    st.markdown(
+        """
+        <style>
+        	/* Expand col_calendar area to maximum height */
+        	div[data-testid="column"]:nth-child(2) {
+        		min-height: 85vh;
+        	}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # ----------------------------------------------------
+    # Divide main layout into 2 columns (Input Form | Calendar)
+    # ----------------------------------------------------
+    col_input_form, col_calendar = st.columns([2, 8])
+
+
+# ====================================================
+# LEFT COLUMN (col_input_form): Place Attendance Input Form
+# ====================================================
+with col_input_form:
+    st.markdown(
+        f"""
+        <center>
+        <div style="font-size:20px; font-weight:bold; margin-bottom:10px; color: yellow;"> 
+            Attendance Records <br> ({st.session_state.get('selected_date', 'Date Not Selected')})
+        </div>
+        </center>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    employees = dm.get_employee_list()
+    
+    # ⭐ Main IF statement starts: The ELSE statement connected to this IF likely caused an error on line 437. ⭐
+    if st.session_state.get('selected_date'): 
+        
+        # Warning if the employee list is empty (First nested IF)
+        if not employees:
+            st.warning("⚙️ Please first register your employee list in the Settings tab..")
+        # Execution if the employee list exists (First nested ELSE)
+        else:
+            
+            # ------------------------------------------------------------------
+            # 1. Integrate Single Input Field per Employee
+            # ------------------------------------------------------------------
+            #st.markdown("##### Enter Attendance Status per Employee")
+            
+            col_header_emp, col_header_status = st.columns([1, 1], gap="small")
+            col_header_emp.markdown("**Employee Name**")
+            col_header_status.markdown("**Status/Time**") 
+
+            for i, emp in enumerate(employees):
+                col_emp, col_input = st.columns([1, 1], gap="small")
+                
+                col_emp.markdown(f"**{emp}**")
+                
+                # NOTE: This get_current_record logic pre-populates st.session_state[key] in the select_date function, 
+                # so that value is prioritized.
+                current_record = get_current_record(emp)
+                if '(' in str(current_record) and ')' in str(current_record):
+                    initial_value = current_record.split('(')[-1].strip(')')
+                else:
+                    initial_value = current_record.strip() if isinstance(current_record, str) else ""
+
+                col_input.text_input(
+                    label='_hidden_time_or_type', 
+                    key=f'emp_input_{i}',
+                    placeholder="HH:MM or TYPE input",
+                    label_visibility='collapsed',
+                    width='stretch'
+                )
+
+            
+            # ------------------------------------------------------------------
+            # 4. Display Memo Input Field
+            # ------------------------------------------------------------------
+            st.markdown("##### 📝 Daily Memo")
+            memo_key = f'memo_{st.session_state["selected_date"]}'
+            current_memo = dm.get_memo(st.session_state["selected_date"]) if hasattr(dm, 'get_memo') else ""
+            st.text_area("Memo", value=current_memo, key=memo_key, height=100, label_visibility='collapsed')
+
+
+            # ------------------------------------------------------------------
+            # 5. Add SAVE, DELETE Buttons
+            # ------------------------------------------------------------------
+            col_save, col_delete = st.columns([1, 1], gap="small")
+            
+            col_save.button("✅ SAVE ALL", on_click=save_multi_attendance, width='stretch', type="primary")
+
+            col_delete.button("❌ DELETE ALL", on_click=delete_multi_attendance, width='stretch', type="secondary")
+
+            st.markdown("---")
+            
+            # ------------------------------------------------------------------
+            # 3. Display TYPE Manual (English)
+            # ------------------------------------------------------------------
+            st.markdown("##### 📚 Attendance Type Manual")
+            manual_text = ""
+            for type_key, description in TYPE_MANUAL.items():
+                manual_text += f"**{type_key}**: {description}  \n"
+            st.markdown(manual_text)
+
+
+# ⭐ ELSE statement connected to the Main IF ⭐
+# This else: block must have the same indentation level as the if st.session_state.get('selected_date'): immediately above it.
+    else:
+        st.info("Click a date on the calendar to enter attendance records.")
+
+
+# ====================================================
+# RIGHT COLUMN (col_calendar): Place Calendar and Navigation
+# ====================================================
+with col_calendar:
+    # Calendar Navigation Buttons
+    col_nav_prev, col_nav_next = st.columns([1, 1])
+    with col_nav_prev:
+        # ⭐ Use width='stretch' instead of use_container_width=True ⭐
+        st.button("◀️ Previous Month ", on_click=change_month, args=(-1,), key="prev_month_btn_cal", width='stretch')
+    with col_nav_next:
+        # ⭐ Use width='stretch' instead of use_container_width=True ⭐
+        st.button("Next Month ▶️", on_click=change_month, args=(1,), key="next_month_btn_cal", width='stretch')
+
+    # ⭐⭐ Added: Display Current Year/Month at the top center of the calendar (30px font) ⭐⭐
+    import datetime # should already be imported at the top.
+
+    # dt_class는 from datetime import datetime as dt_class에서 정의된 별칭입니다.
+    current_month_name = dt_class(st.session_state['current_year'], st.session_state['current_month'], 1).strftime("%B %Y")
+    
+    # 텍스트가 중앙 컬럼의 중앙에 오도록 배치 (기존 스타일 유지)
+    st.markdown(
+        f"""
+        <div style='text-align: center; 
+                    font-size: 30px; 
+                    font-weight: bold; 
+                    margin-bottom: 10px;
+                    white-space: nowrap;'>  {current_month_name}
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    # ⭐⭐ Added End ⭐⭐
+
+
+    # --- Calendar Grid ---
+    cal = pycal.Calendar(pycal.SUNDAY)
+    # ... (Rest of the code omitted)    st.markdown("---")
+
+    # --- Calendar Grid ---
+    cal = pycal.Calendar(pycal.SUNDAY)
+    month_days = cal.monthdatescalendar(
+        st.session_state['current_year'],
+        st.session_state['current_month']
+    )
+
+    # Weekly Header (Sun-Sat)
+    header_cols = st.columns(7)
+    weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    for i, day in enumerate(weekdays):
+        color = "red" if i == 0 or i == 6 else "white"
+        header_cols[i].markdown(
+            f"<h6 style='text-align: center; color:{color}; font-weight:bold; margin-top:0; margin-bottom:0;'>{day}</h6>",
+            unsafe_allow_html=True
+        )
+
+    # Create Date Cells
+    for week in month_days:
+        cols = st.columns(7)
+        for i, day_dt in enumerate(week):
+
+            day_str = day_dt.strftime("%Y-%m-%d")
+
+            if day_dt.month != st.session_state['current_month']:
+                cols[i].markdown(
+                    "<div style='text-align: center; color:grey; font-size: 10px;'>-</div>",
+                    unsafe_allow_html=True
+                )
+                continue
+
+            day_records = dm.attendance_data.get(day_str, {})
+            status_summary = defaultdict(int)
+
+            for emp in dm.get_employee_list():
+                record = day_records.get(emp)
+                status = 'NONE'
+                if record:
+                    raw_status = record.split('(')[0].strip().upper()
+                    status = raw_status if raw_status in STATUS_COLORS else 'WO'
+                status_summary[status] += 1
+
+            bg_color = STATUS_COLORS['NONE']
+            if status_summary['LATE'] > 0:
+                bg_color = STATUS_COLORS['LATE']
+            elif status_summary['PEL'] > 0:
+                bg_color = STATUS_COLORS['PEL']
+            elif status_summary['ANL'] > 0:
+                bg_color = STATUS_COLORS['ANL']
+            elif status_summary['ATT'] > 0:
+                bg_color = STATUS_COLORS['ATT']
+
+            border_style = (
+                f"3px solid {STATUS_COLORS['ATT']}"
+                if day_str == st.session_state.get('selected_date')
+                else "1px solid #444444"
             )
+
+            btn_key = f"day_btn_{day_str}"
+
+            with cols[i]:
+                # ⭐ Use width='stretch' instead of use_container_width=True ⭐
+                if st.button(
+                    str(day_dt.day),
+                    key=btn_key,
+                    on_click=select_date,
+                    args=(day_dt.day,),
+                    width='stretch'
+                ):
+                    pass
+
+               # ... (중략) ...
+
+                record_list = []
+                for emp in dm.get_employee_list():
+                    record = day_records.get(emp)
+                    if record:
+                        # 1. Changed 'display_name' to the full 'emp' to display the entire employee name (e.g., Mr. Ray displayed as Mr. Ray)
+                        display_name = emp # Original: emp.split(' ')[0]
+                        
+                        # 2. Display status in uppercase (maintaining existing behavior)
+                        # Extract status from attendance record and display in uppercase (e.g., Late(08:40) -> LATE(08:40))
+                        # record_list.append(f"{display_name}: {record}") # Original: includes lowercase status
+                        
+                        # Convert status (LATE, ATT, etc.) in the attendance record to uppercase
+                        # Example: 'Late(08:40)' -> 'LATE(08:40)'
+                        # Record format: 'Status(Time)'
+                        parts = re.split(r'(\(|\))', record, 1) # 'Status', '(', 'Time)'
+                        if len(parts) >= 3:
+                            status_upper = parts[0].strip().upper()
+                            time_info = parts[2] if parts[2].endswith(')') else parts[2] + ')'
+                            
+                            # ⭐ 수정 시작: 폰트 색상 조건부 지정 ⭐
+                            if status_upper == 'ATT':
+                                font_color = 'green' # ATT는 Green
+                            elif status_upper == 'LATE':
+                                font_color = 'red'   # LATE는 Red
+                            else:
+                                font_color = 'yellow' # WO, PEL, ANL 등 기타는 Yellow
+
+                            # HTML span 태그로 근태 기록 텍스트를 감싸서 색상 적용
+                            display_record = f"<span style='color:{font_color};'>{status_upper}{parts[1]}{time_info}</span>"
+                            record_list.append(f"{display_name}: {display_record}")
+                            # ⭐ 수정 끝 ⭐
+                            
+                        else:
+                            # Use original method for unexpected formats, but status in uppercase (e.g., 'WO')
+                            status_upper_simple = record.upper()
+                            
+                            # ⭐ 수정 시작: Type (WO, PEL 등)에 대한 색상 지정 ⭐
+                            if status_upper_simple == 'ATT':
+                                font_color = 'green'
+                            elif status_upper_simple == 'LATE':
+                                font_color = 'red'
+                            else:
+                                font_color = 'yellow'
+
+                            display_record = f"<span style='color:{font_color};'>{status_upper_simple}</span>"
+                            record_list.append(f"{display_name}: {display_record}")
+                            # ⭐ 수정 끝 ⭐
+
+                if record_list:
+                    # 3. Line break fix: Change join delimiter from '-' to '<br>' for line breaks
+                    # Also, the {'-'.join(record_list)} part inside the <p> tag has been changed to '<br>'.join(record_list).
+                    ############## Adjust Calendar Cell Info Font Size ###########################
+                    
+                    # ⭐ 수정 시작: <p> 태그를 <div>로 바꾸고, color: lightgrey 속성을 삭제/수정합니다. ⭐
+                    st.markdown(
+                        f"""
+                        <div style='background-color:{bg_color};
+                                     padding: 2px;
+                                     border: {border_style};
+                                     border-radius: 5px;
+                                     margin-top: -30px;
+                                     margin-bottom: 5px;
+                                     text-align: center;'>
+                        </div>
+                        <div style='font-size: 16px; margin: 0;'> 
+                            {'<br>'.join(record_list)}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    # ⭐ 수정 끝 ⭐
+
+# End of Right Column
+
+
+# ----------------------------------------------------
+# TAB 2: Statistics/Reports (Implemented in attendance_statistics_ctk.py)
+# ----------------------------------------------------
+with tab2:
+    pass    # (Tab 2 content)
+    st.header("📊 Attendance Statistics and Reports")
+    
+    # 1. Select Report Type
+    report_type = st.radio(
+        "Select Report Type",
+        ["Monthly Statistics", "Yearly Statistics", "Overall Statistics"],
+        key='report_type_radio',
+        horizontal=True
+    )
+    
+    # 2. Enter Period
+    current_year = date.today().year
+    current_month = date.today().month
+    
+    year = current_year
+    month = current_month
+    
+    col_type_params, col_empty = st.columns([1, 3])
+    
+    if report_type == "Monthly Statistics":
+        with col_type_params:
+            year = st.number_input("Year", min_value=2020, max_value=2050, value=current_year, key='stat_year')
+            month = st.number_input("Month", min_value=1, max_value=12, value=current_month, key='stat_month')
+            
+    elif report_type == "Yearly Statistics":
+        with col_type_params:
+            year = st.number_input("Year", min_value=2020, max_value=2050, value=current_year, key='stat_year_only')
+            month = None
+    else:
+        year = None
+        month = None
+        
+    # 3. Calculate Statistics Button
+    if st.button("Calculate Statistics and View Chart", key="calculate_stats_btn", type="secondary"):
+        
+        type_map = {"Monthly Statistics": "monthly", "Yearly Statistics": "yearly", "Overall Statistics": "total"}
+        api_type = type_map[report_type]
+        
+        try:
+            # Use StatisticsExporter's internal helper function to set period and calculate
+            df, title_ko, start_date, end_date = se._get_df_for_period(api_type, year, month)
+            
+            st.session_state['stats_df'] = df
+            st.session_state['stats_title'] = title_ko
+            st.session_state['stats_type'] = api_type
+            st.session_state['stats_year'] = year
+            st.session_state['stats_month'] = month
+            
+        except Exception as e:
+            st.error(f"Statistics Calculation Error: {e}")
+            st.session_state['stats_df'] = pd.DataFrame() 
+            
+
+    # 4. Display Results
+    if 'stats_df' in st.session_state and not st.session_state['stats_df'].empty:
+        df_display = st.session_state['stats_df']
+        title_ko = st.session_state['stats_title']
+        
+        st.subheader(f"Result: {title_ko}")
+        st.dataframe(df_display, hide_index=True, use_container_width=True)
+        
+        # 5. Display Chart
+        try:
+            chart_title = title_ko.replace("근태 통계", "Attendance Statistics") 
+            fig = se.create_attendance_chart(df_display.copy(), chart_title)
+            st.pyplot(fig)
+        except Exception as e:
+            st.warning(f"Error occurred during chart creation: {e}. (Can happen if the employee list is empty)")
+            
+        
+        # 6. Export Report Button
+        st.subheader("Export Report (Available after calculating statistics)")
+        
+        col_pdf, col_excel = st.columns(2)
+        
+        type_for_file = st.session_state['stats_type']
+        year_for_file = st.session_state['stats_year']
+        month_for_file = st.session_state['stats_month']
+        
+        # Generate PDF/Excel filename
+        filename_base = f"attendance_report_{year_for_file or 'All'}"
+        if month_for_file:
+            filename_base += f"_{month_for_file:02d}"
+        
+        # PDF Download
+        col_pdf.download_button(
+            label="Download PDF Report",
+            data=generate_pdf_for_download(type_for_file, year_for_file, month_for_file),
+            file_name=f"{filename_base}.pdf",
+            mime="application/pdf",
+            # ⭐ Use width='stretch' instead of use_container_width=True ⭐
+            width='stretch' 
+        )
+            
+        # Excel Download
+        col_excel.download_button(
+            label="Download Excel Report",
+            data=generate_excel_for_download(type_for_file, year_for_file, month_for_file),
+            file_name=f"{filename_base}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            # ⭐ Use width='stretch' instead of use_container_width=True ⭐
+            width='stretch' 
+        )
+
+# ----------------------------------------------------
+# TAB 3: Settings (Implemented in settings_view_ctk.py)
+# ----------------------------------------------------
+with tab3:
+    st.header("⚙️ System Settings and Employee Management")
+    
+    # 1. Employee List Management
+    st.subheader("Employee List (One per line)")
+    
+    current_employees = "\n".join(dm.get_employee_list())
+    
+    employee_input = st.text_area(
+        "Enter the list of employee names and press the 'Save Settings' button:",
+        value=current_employees,
+        height=200,
+        key='employee_list_input'
+    )
+    
+    # 2. Set Attendance Standard Time
+    st.subheader("Set Attendance Standard Time")
+    
+    current_time = dm.settings.get('attendance_time', '09:00')
+    time_input = st.text_input(
+        "Standard Time (HH:MM)",
+        value=current_time,
+        #key='attendance_time_input',
+        help="E.g., 09:00. If this time is changed, all records will be recalculated."
+    )
+    
+    # 3. Save Settings Button
+    if st.button("Save Settings and Recalculate Attendance", key="save_settings_btn", type="primary"):
+        new_employees = [e.strip() for e in employee_input.split('\n') if e.strip()]
+        new_time = time_input.strip()
+        
+        # Time format validation
+        time_pattern = re.compile(r'^(?:[0-9]|1\d|2[0-3]):[0-5]\d$')
+
+        if not time_pattern.match(new_time):
+            st.error("Invalid time format. Please enter in **H:MM or HH:MM format (e.g., 9:00 or 09:00)**.")
+            st.stop()
+            
+        new_settings = {
+            'employees': new_employees,
+            'attendance_time': new_time
+        }
+        
+        dm.update_settings_and_recalculate(new_settings)
+        st.success("Settings successfully saved, and attendance records have been recalculated if the standard time was changed.")
+        st.rerun()
+        
+    st.markdown("---")
+
+    # 4. Data Backup
+    st.subheader("Data Backup")
+    col_backup, col_info = st.columns(2)
+    
+    backup_path = "attendance_backups"
+    if col_backup.button("Backup Current Data"):
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_dir = os.path.join(backup_path, f"backup_{timestamp}")
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            # Copy settings.json and attendance.json files
+            shutil.copy("settings.json", backup_dir)
+            shutil.copy("attendance.json", backup_dir) 
+            
+            st.success(f"Data successfully backed up: {backup_dir}")
+        except Exception as e:
+            st.error(f"Error occurred during backup: {e}")
+
+    col_info.info(f"Data Files: settings.json, attendance.json")
+
+# ----------------------------------------------------
+# TAB 4: Exchange Rate Inquiry (Implemented in ExchangeRateViewer.py)
+# ----------------------------------------------------
+with tab4:
+    st.header("💵 Real-time Exchange Rate Information (Based on USD)")
+    
+    if 'exchange_rates' not in st.session_state:
+        fetch_exchange_rates()
+    
+    col_status, col_button = st.columns([3, 1])
+    
+    col_status.markdown(st.session_state.get('exchange_status', 'Status: Not Fetched'), unsafe_allow_html=True)
+    col_button.button("Refresh", on_click=fetch_exchange_rates, key="refresh_rates")
+
+    rates = st.session_state.get('exchange_rates')
+    
+    if rates:
+        rate_data = {
+            "Currency": [f"{CURRENCY_NAMES.get(c, c)} ({c})" for c in TARGET_CURRENCIES],
+            "Exchange Rate (Per 1 USD)": [rates.get(c, 0) for c in TARGET_CURRENCIES]
+        }
+        rate_df = pd.DataFrame(rate_data)
+        
+        st.dataframe(
+            rate_df.style.format({"Exchange Rate (Per 1 USD)": "{:,.2f}"}),
+            use_container_width=True,
+            hide_index=True
+        )

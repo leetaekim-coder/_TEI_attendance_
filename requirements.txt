@@ -1,9 +1,9 @@
+# requirements.txt 예시
 streamlit
 pandas
-matplotlib
-numpy
-Pillow
+requests
 openpyxl
-gspread 
-oauth2client
-gspread-dataframe 
+matplotlib
+reportlab
+xlsxwriter
+# data_manager, statistics_exporter 등 프로젝트 내부 파일은 제외
