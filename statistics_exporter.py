@@ -26,16 +26,21 @@ matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 웹 환경에서는 폰트 경로를 상대 경로로 관리하는 것이 좋습니다.
 # 여기서는 윈도우 경로를 유지하되, 경고 처리 추가
-FONT_PATH = "C:\\Windows\\Fonts\\malgun.ttf" 
+# 1. 폰트 경로를 현재 스크립트 파일 기준으로 재정의
+FONT_FILENAME = "malgun.ttf" 
+FONT_PATH = pathlib.Path(__file__).resolve().parent / FONT_FILENAME 
 KOREAN_FONT = 'Helvetica' # 기본값
 
 try:
-    if os.path.exists(FONT_PATH):
-        registerFont(TTFont('KoreanFont', FONT_PATH)) 
+    # 2. os.path.exists 대신 FONT_PATH.exists()를 사용하고,
+    #    폰트 파일 경로를 FONT_PATH.as_posix()로 전달합니다.
+    if FONT_PATH.exists():
+        registerFont(TTFont('KoreanFont', FONT_PATH.as_posix())) 
         registerFontFamily('KoreanFont', normal='KoreanFont', bold='KoreanFont')
         KOREAN_FONT = 'KoreanFont'
     else:
-        print(f"[WARNING] MalgunGothic font file not found. Using default font for PDF.")
+        print(f"Korean font file not found at: {FONT_PATH.as_posix()}. Using default font.")
+        
 except Exception as e:
     print(f"[ERROR] Failed to register Korean font: {e}")
 
@@ -301,4 +306,5 @@ class StatisticsExporter:
         except Exception as e:
             if os.path.exists('temp_chart.png'):
                 os.remove('temp_chart.png')
+
             raise Exception(f"Excel export error: {e}")
